@@ -1,1 +1,13 @@
-{"name":"debtfreein90days","version":"1.0.0","private":true,"type":"module","scripts":{"start":"node server.js"},"dependencies":{"express":"^5.1.0","razorpay":"^2.9.6"},"engines":{"node":">=20"}}
+{
+  "name": "debtfreein90days",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.68.0"
+  }
+}
