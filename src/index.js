@@ -96,6 +96,48 @@ async function verifyRazorpayPayment(env, payload) {
   return { order, payment };
 }
 
+function absoluteDownloadLinks(origin, orderId, paymentId, token) {
+  const base = new URL(origin);
+  const params = new URLSearchParams({ order_id: orderId, payment_id: paymentId, token });
+  return {
+    normal: `${base.origin}/download/normal?${params.toString()}`,
+    mobile: `${base.origin}/download/mobile?${params.toString()}`,
+    epub: `${base.origin}/download/epub?${params.toString()}`
+  };
+}
+
+async function sendPurchaseEmail(env, origin, payment, order, token) {
+  if (!env.RESEND_API_KEY) {
+    console.warn('purchase-email: RESEND_API_KEY is not configured');
+    return;
+  }
+  const customerEmail = String(payment.email || '').trim().toLowerCase();
+  if (!customerEmail) {
+    console.warn('purchase-email: Razorpay did not return a customer email');
+    return;
+  }
+
+  const links = absoluteDownloadLinks(origin, order.id, payment.id, token);
+  const html = `<!doctype html><html><body style="margin:0;background:#f6f2e8;font-family:Arial,sans-serif;color:#17213a"><div style="max-width:620px;margin:32px auto;background:#fff;padding:36px;border-radius:16px"><div style="font-size:13px;letter-spacing:2px;color:#c7971d;font-weight:700">DEBT-FREE IN 90 DAYS</div><h1 style="margin:14px 0 8px">Your purchase is confirmed</h1><p>Thank you for your purchase. Your payment of <strong>$9.99 USD</strong> has been successfully verified.</p><p>Your purchase includes the complete Debt-Free in 90 Days guide and 90-Day Toolkit in three formats:</p><p><a href="${links.normal}" style="display:block;background:#d8a92e;color:#111;text-decoration:none;text-align:center;padding:14px;border-radius:8px;font-weight:700;margin:12px 0">Download Normal PDF</a><a href="${links.mobile}" style="display:block;background:#d8a92e;color:#111;text-decoration:none;text-align:center;padding:14px;border-radius:8px;font-weight:700;margin:12px 0">Download Mobile PDF</a><a href="${links.epub}" style="display:block;background:#d8a92e;color:#111;text-decoration:none;text-align:center;padding:14px;border-radius:8px;font-weight:700;margin:12px 0">Download EPUB</a></p><p style="font-size:13px;color:#667085">These secure download links expire after 1 hour. You can also access your downloads on the confirmation page you received after payment.</p><p style="font-size:13px;color:#667085">If you have any trouble, contact support@debtfreein90days.shop.</p></div></body></html>`;
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${env.RESEND_API_KEY}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      from: 'Debt-Free in 90 Days <support@debtfreein90days.shop>',
+      to: [customerEmail],
+      subject: 'Your Debt-Free in 90 Days purchase is confirmed',
+      html
+    })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || data?.error || `Resend API error (${response.status})`);
+  console.log(`purchase-email: sent to ${customerEmail}`);
+}
+
 async function handleCreateOrder(request, env) {
   const body = await request.json().catch(() => ({}));
   if (body.product !== env.PRODUCT_ID) return json({ error: 'Invalid product.' }, 400);
@@ -106,7 +148,6 @@ async function handleCreateOrder(request, env) {
   if (!env.DOWNLOAD_TOKEN_SECRET) return json({ error: 'Download token secret is not configured in Cloudflare.' }, 500);
 
   try {
-    // Razorpay Orders API accepts amount, currency, receipt and notes. Capture is handled by the account/payment configuration.
     const order = await razorpayRequest(env, '/orders', {
       method: 'POST',
       body: JSON.stringify({
@@ -123,12 +164,16 @@ async function handleCreateOrder(request, env) {
   }
 }
 
-async function handleVerifyPayment(request, env) {
+async function handleVerifyPayment(request, env, ctx) {
   try {
     const payload = await request.json();
     const { order, payment } = await verifyRazorpayPayment(env, payload);
     const token = await makeDownloadToken(env, order.id, payment.id);
     const query = new URLSearchParams({ order_id: order.id, payment_id: payment.id, token });
+
+    // Email is sent after payment verification and does not block the customer redirect.
+    ctx.waitUntil(sendPurchaseEmail(env, new URL(request.url).origin, payment, order, token).catch(error => console.error('purchase-email', error)));
+
     return json({ success: true, redirect_url: `/success.html?${query.toString()}` });
   } catch (error) {
     console.error('verify-payment', error);
@@ -213,10 +258,10 @@ async function handleWebhook(request, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (request.method === 'POST' && url.pathname === '/api/create-order') return handleCreateOrder(request, env);
-    if (request.method === 'POST' && url.pathname === '/api/verify-payment') return handleVerifyPayment(request, env);
+    if (request.method === 'POST' && url.pathname === '/api/verify-payment') return handleVerifyPayment(request, env, ctx);
     if (request.method === 'GET' && url.pathname === '/api/downloads') return handleDownloads(request, env);
     if (request.method === 'POST' && url.pathname === '/api/razorpay-webhook') return handleWebhook(request, env);
     if (request.method === 'GET' && url.pathname === '/download/normal') return handleDownload(request, env, 'normal');
