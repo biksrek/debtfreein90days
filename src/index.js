@@ -111,9 +111,12 @@ async function sendPurchaseEmail(env, origin, payment, order, token) {
     console.warn('purchase-email: RESEND_API_KEY is not configured');
     return;
   }
-  const customerEmail = String(payment.email || '').trim().toLowerCase();
-  if (!customerEmail) {
-    console.warn('purchase-email: Razorpay did not return a customer email');
+
+  // Prefer the email the customer entered on our checkout and stored on the Razorpay order.
+  // Razorpay may return the merchant/account email in some test-mode payment responses.
+  const customerEmail = String(order?.notes?.customer_email || payment.email || '').trim().toLowerCase();
+  if (!customerEmail || !customerEmail.includes('@')) {
+    console.warn('purchase-email: no valid customer email found');
     return;
   }
 
@@ -142,6 +145,11 @@ async function handleCreateOrder(request, env) {
   const body = await request.json().catch(() => ({}));
   if (body.product !== env.PRODUCT_ID) return json({ error: 'Invalid product.' }, 400);
 
+  const customerEmail = String(body.email || '').trim().toLowerCase();
+  if (!customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+    return json({ error: 'Please enter a valid email address.' }, 400);
+  }
+
   const amount = Math.round(Number(env.PRODUCT_PRICE_USD) * 100);
   if (!Number.isFinite(amount) || amount < 1) return json({ error: 'Product price is not configured.' }, 500);
   if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET) return json({ error: 'Razorpay credentials are not configured in Cloudflare.' }, 500);
@@ -154,7 +162,7 @@ async function handleCreateOrder(request, env) {
         amount,
         currency: env.PRODUCT_CURRENCY,
         receipt: `df90_${Date.now()}`,
-        notes: { product: env.PRODUCT_ID }
+        notes: { product: env.PRODUCT_ID, customer_email: customerEmail }
       })
     });
     return json({ order_id: order.id, amount: order.amount, currency: order.currency, key_id: env.RAZORPAY_KEY_ID });
@@ -171,7 +179,6 @@ async function handleVerifyPayment(request, env, ctx) {
     const token = await makeDownloadToken(env, order.id, payment.id);
     const query = new URLSearchParams({ order_id: order.id, payment_id: payment.id, token });
 
-    // Email is sent after payment verification and does not block the customer redirect.
     ctx.waitUntil(sendPurchaseEmail(env, new URL(request.url).origin, payment, order, token).catch(error => console.error('purchase-email', error)));
 
     return json({ success: true, redirect_url: `/success.html?${query.toString()}` });
