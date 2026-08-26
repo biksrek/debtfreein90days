@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "debtfreein90days",
+  "main": "./src/index.js",
+  "compatibility_date": "2026-08-26",
+  "assets": {
+    "directory": ".",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/download/*"]
+  },
+  "r2_buckets": [
+    {
+      "binding": "BOOKS",
+      "bucket_name": "debtfreein90days-files"
+    }
+  ],
+  "vars": {
+    "PRODUCT_PRICE_USD": "9.99",
+    "PRODUCT_CURRENCY": "USD",
+    "PRODUCT_ID": "debt-free-in-90-days"
+  }
+}
