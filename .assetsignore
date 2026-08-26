@@ -1,0 +1,12 @@
+src/
+server.js
+package.json
+package-lock.json
+.env*
+.dev.vars*
+.git/
+.github/
+README.md
+wrangler.jsonc
+.assetsignore
+.gitignore
