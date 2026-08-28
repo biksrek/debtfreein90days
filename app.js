@@ -24,8 +24,6 @@ if (!emailInput && terms) {
 const setStatus = (message) => { if (statusEl) statusEl.textContent = message; };
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 
-// Keep the Pay button usable even if an older cached HTML version is missing
-// the email field. In that case, ask for the delivery email when Pay is clicked.
 const updateButton = () => {
   if (buyButton) buyButton.disabled = !terms?.checked;
 };
@@ -67,6 +65,25 @@ buyButton?.addEventListener('click', async () => {
     if (!response.ok) throw new Error(order.error || 'Could not create the order.');
     if (!window.Razorpay) throw new Error('Razorpay Checkout did not load. Please refresh and try again.');
 
+    // GA4: checkout started
+    if (typeof window.gtag === 'function') {
+      window.gtag('event', 'begin_checkout', {
+        currency: order.currency || 'USD',
+        value: Number(order.amount || 999) / 100,
+        items: [{item_id: 'debt-free-in-90-days', item_name: 'Debt-Free in 90 Days', price: Number(order.amount || 999) / 100, quantity: 1}]
+      });
+    }
+    // Meta Pixel: checkout started
+    if (typeof window.fbq === 'function') {
+      window.fbq('track', 'InitiateCheckout', {
+        value: Number(order.amount || 999) / 100,
+        currency: order.currency || 'USD',
+        content_name: 'Debt-Free in 90 Days',
+        content_ids: ['debt-free-in-90-days'],
+        content_type: 'product'
+      });
+    }
+
     const rzp = new Razorpay({
       key: order.key_id,
       amount: order.amount,
@@ -90,6 +107,28 @@ buyButton?.addEventListener('click', async () => {
         });
         const result = await verifyResponse.json();
         if (!verifyResponse.ok || !result.success) throw new Error(result.error || 'Payment could not be verified.');
+
+        const purchaseValue = Number(order.amount || 999) / 100;
+        // GA4: confirmed purchase
+        if (typeof window.gtag === 'function') {
+          window.gtag('event', 'purchase', {
+            transaction_id: payment.razorpay_payment_id || order.order_id,
+            currency: order.currency || 'USD',
+            value: purchaseValue,
+            items: [{item_id: 'debt-free-in-90-days', item_name: 'Debt-Free in 90 Days', price: purchaseValue, quantity: 1}]
+          });
+        }
+        // Meta Pixel: confirmed purchase
+        if (typeof window.fbq === 'function') {
+          window.fbq('track', 'Purchase', {
+            value: purchaseValue,
+            currency: order.currency || 'USD',
+            content_name: 'Debt-Free in 90 Days',
+            content_ids: ['debt-free-in-90-days'],
+            content_type: 'product'
+          });
+        }
+
         window.location.href = result.redirect_url || '/success.html';
       }
     });
